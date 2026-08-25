@@ -33,208 +33,115 @@ small{display:block;color:#666;margin:18px auto;max-width:560px;line-height:1.5}
 <body>
 <main>
 <h1>CRÉPOUILLE</h1>
-
 <div id="count">0</div>
 <div id="label">crêpes au total</div>
 <div id="status">Prêt</div>
-
+<div id="heard" style="font-size:14px;color:#666;min-height:20px"></div>
 <button onclick="manualChange(-1)">−</button>
 <button onclick="manualZero()">0</button>
 <button onclick="manualChange(1)">+</button>
 <br>
 <button id="listen" onclick="toggle()">Démarrer l’écoute</button>
-
 <div class="badge">Exemples : « crépouille Mathieu plus un », « crépouille Sébastien moins un », « crépouille Camille plus un »</div>
 <small>
 Le mot d’activation « crépouille » doit être présent avant le prénom et la commande.
 Prénoms préconfigurés : Mathieu, Sébastien, Cyrille, Emilie, Nathalie et Camille.
 Exemples : « crépouille Mathieu plus un », « crépouille Nathalie moins un », « crépouille Camille plus un ».
 </small>
-
 <div class="card">
   <h2>Compteurs individuels</h2>
   <div id="people"></div>
 </div>
-
 <div class="card admin">
   <h2>Ajouter un prénom</h2>
   <input id="newName" placeholder="Ex. Mathieu">
   <button onclick="addPerson()">Ajouter</button>
 </div>
 </main>
-
 <script>
 const DEFAULT_PEOPLE = ["Mathieu","Sébastien","Cyrille","Emilie","Nathalie","Camille"];
-let data = JSON.parse(localStorage.getItem("crepouilleData") || "null") || {
-  total: 0,
-  people: Object.fromEntries(DEFAULT_PEOPLE.map(n => [n,0]))
-};
-
+let data = JSON.parse(localStorage.getItem("crepouilleData") || "null") || { total:0, people:{} };
+if (!data.people || typeof data.people !== "object") data.people = {};
+DEFAULT_PEOPLE.forEach(name => { if (!(name in data.people)) data.people[name] = 0; });
+delete data.people["Delphine"];
 let listening=false, recognition=null, lastCommandKey="", lastTime=0;
 const $=id=>document.getElementById(id);
-
-function save(){
-  localStorage.setItem("crepouilleData", JSON.stringify(data));
-}
-function normalize(s){
-  return s.toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .replace(/[’']/g," ")
-    .replace(/\s+/g," ").trim();
-}
-function titleCase(s){
-  return s.trim().split(/\s+/).map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(" ");
-}
+function save(){ localStorage.setItem("crepouilleData", JSON.stringify(data)); }
+function normalize(s){ return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[’']/g," ").replace(/\s+/g," ").trim(); }
+function titleCase(s){ return s.trim().split(/\s+/).map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(" "); }
 function render(){
   $("count").textContent=data.total;
-  const holder=$("people");
-  holder.innerHTML="";
-  Object.entries(data.people)
-    .sort((a,b)=>a[0].localeCompare(b[0],"fr"))
-    .forEach(([name,value])=>{
-      const row=document.createElement("div");
-      row.className="person";
-      row.innerHTML=`<strong>${escapeHtml(name)}</strong><span>${value}</span>`;
-      holder.appendChild(row);
-    });
+  const holder=$("people"); holder.innerHTML="";
+  Object.entries(data.people).sort((a,b)=>a[0].localeCompare(b[0],"fr")).forEach(([name,value])=>{
+    const row=document.createElement("div"); row.className="person"; row.innerHTML=`<strong>${escapeHtml(name)}</strong><span>${value}</span>`; holder.appendChild(row);
+  });
   save();
 }
-function escapeHtml(s){
-  return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
-}
-function beep(freq=700){
-  try{
-    const C=window.AudioContext||window.webkitAudioContext;
-    const c=new C(),o=c.createOscillator(),g=c.createGain();
-    o.frequency.value=freq; g.gain.value=.08;
-    o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime+.09);
-  }catch(e){}
-}
-function setStatus(t){$("status").textContent=t;}
-
-function applyPersonCommand(name, delta){
-  if(!(name in data.people)) return false;
-  data.people[name]+=delta;
-  data.total+=delta;
-  render();
-  setStatus(`${name} ${delta>0?"+1":"−1"}`);
-  beep(delta>0?880:520);
-  return true;
-}
-function manualChange(n){
-  data.total+=n;
-  render();
-  setStatus(n>0?"+1 total":"−1 total");
-  beep(n>0?880:520);
-}
-function manualZero(){
-  data.total=0;
-  Object.keys(data.people).forEach(k=>data.people[k]=0);
-  render();
-  setStatus("Tous les compteurs à zéro");
-  beep(660);
-}
-function addPerson(){
-  const input=$("newName");
-  const name=titleCase(input.value);
-  if(!name) return;
-  if(!(name in data.people)) data.people[name]=0;
-  input.value="";
-  render();
-  setStatus(`${name} ajouté`);
-}
-
+function escapeHtml(s){ return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m])); }
+function beep(freq=700){ try{ const C=window.AudioContext||window.webkitAudioContext; const c=new C(),o=c.createOscillator(),g=c.createGain(); o.frequency.value=freq; g.gain.value=.08; o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime+.09); }catch(e){} }
+function setStatus(t){ $("status").textContent=t; }
+function applyPersonCommand(name, delta){ if(!(name in data.people)) return false; data.people[name]+=delta; data.total+=delta; render(); setStatus(`${name} ${delta>0?"+1":"−1"}`); beep(delta>0?880:520); return true; }
+function manualChange(n){ data.total+=n; render(); setStatus(n>0?"+1 total":"−1 total"); beep(n>0?880:520); }
+function manualZero(){ data.total=0; Object.keys(data.people).forEach(k=>data.people[k]=0); render(); setStatus("Tous les compteurs à zéro"); beep(660); }
+function addPerson(){ const input=$("newName"); const name=titleCase(input.value); if(!name) return; if(!(name in data.people)) data.people[name]=0; input.value=""; render(); setStatus(`${name} ajouté`); }
 function detectPerson(text){
-  const ntext=normalize(text);
-  let best=null;
+  const ntext=normalize(text); let best=null;
   for(const name of Object.keys(data.people)){
     const nn=normalize(name);
-    if(ntext.includes(` ${nn} `) || ntext.endsWith(` ${nn}`) || ntext.startsWith(`${nn} `)){
-      if(!best || nn.length>normalize(best).length) best=name;
+    if(ntext.includes(` ${nn} `)||ntext.endsWith(` ${nn}`)||ntext.startsWith(`${nn} `)){
+      if(!best||nn.length>normalize(best).length) best=name;
     }
   }
   return best;
 }
+function findWakeWord(t){
+  const variants=["crepouille","crepouilles","cre pouille","crep ouille","crepe ouille","crepeouille","cr epouille"];
+  for(const v of variants){ const i=t.indexOf(v); if(i>=0) return {index:i,length:v.length}; }
+  return null;
+}
 function parseCommand(text){
-  const t=normalize(text);
-  if(!t.includes("crepouille")) return null;
-
-  const after=t.slice(t.indexOf("crepouille")+"crepouille".length).trim();
-  const person=detectPerson(" "+after+" ");
-  if(!person) return {error:"prenom"};
-
+  const t=normalize(text); const wake=findWakeWord(t); if(!wake) return null;
+  const after=t.slice(wake.index+wake.length).trim();
+  const person=detectPerson(" "+after+" "); if(!person) return {error:"prenom"};
   let delta=null;
   if(/moins un|enleve un|retire un|decremente/.test(after)) delta=-1;
   else if(/plus un|ajoute un|incremente/.test(after)) delta=1;
   else return {error:"commande"};
-
   return {person,delta};
 }
-
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 function setup(){
   if(!SR){setStatus("Reconnaissance vocale non disponible");return false}
-  recognition=new SR();
-  recognition.lang="fr-FR";
-  recognition.continuous=true;
-  recognition.interimResults=false;
-  recognition.maxAlternatives=3;
-
+  recognition=new SR(); recognition.lang="fr-FR"; recognition.continuous=true; recognition.interimResults=true; recognition.maxAlternatives=3;
   recognition.onresult=e=>{
     for(let i=e.resultIndex;i<e.results.length;i++){
+      const preview=e.results[i][0]?.transcript||""; if(preview) $("heard").textContent="Entendu : « "+preview+" »";
       if(!e.results[i].isFinal) continue;
-      let parsed=null, chosen="";
+      let parsed=null;
       for(let a=0;a<e.results[i].length;a++){
-        const transcript=e.results[i][a].transcript;
-        const candidate=parseCommand(transcript);
-        if(candidate && !candidate.error){
-          parsed=candidate; chosen=transcript; break;
-        }
-        if(!parsed && candidate){ parsed=candidate; chosen=transcript; }
+        const candidate=parseCommand(e.results[i][a].transcript);
+        if(candidate&&!candidate.error){ parsed=candidate; break; }
+        if(!parsed&&candidate) parsed=candidate;
       }
       if(!parsed) continue;
       if(parsed.error==="prenom"){setStatus("Prénom non reconnu");continue}
       if(parsed.error==="commande"){setStatus("Commande non reconnue");continue}
-
-      const key=`${parsed.person}:${parsed.delta}`;
-      const now=Date.now();
-      if(key===lastCommandKey && now-lastTime<1200) continue;
-      lastCommandKey=key; lastTime=now;
-      applyPersonCommand(parsed.person, parsed.delta);
+      const key=`${parsed.person}:${parsed.delta}`; const now=Date.now();
+      if(key===lastCommandKey&&now-lastTime<1200) continue;
+      lastCommandKey=key; lastTime=now; applyPersonCommand(parsed.person,parsed.delta);
     }
   };
-  recognition.onerror=e=>{
-    if(listening) setStatus("Écoute active — relance…");
-  };
-  recognition.onend=()=>{
-    if(listening) setTimeout(()=>{try{recognition.start()}catch(e){}},300);
-  };
+  recognition.onerror=e=>{ if(listening) setStatus("Écoute active — relance…"); };
+  recognition.onend=()=>{ if(listening) setTimeout(()=>{try{recognition.start()}catch(e){}},300); };
   return true;
 }
 function toggle(){
-  if(listening){
-    listening=false;
-    try{recognition.stop()}catch(e){}
-    $("listen").textContent="Démarrer l’écoute";
-    $("listen").classList.add("off");
-    setStatus("Pause");
-    return;
-  }
-  if(!setup()) return;
-  listening=true;
-  try{
-    recognition.start();
-    $("listen").textContent="Mettre en pause";
-    $("listen").classList.remove("off");
-    setStatus("Écoute active");
-  }catch(e){
-    listening=false;
-    setStatus("Impossible de démarrer");
-  }
+  if(listening){ listening=false; try{recognition.stop()}catch(e){} $("listen").textContent="Démarrer l’écoute"; $("listen").classList.add("off"); setStatus("Pause"); return; }
+  if(!setup()) return; listening=true;
+  try{ recognition.start(); $("listen").textContent="Mettre en pause"; $("listen").classList.remove("off"); setStatus("Écoute active"); }
+  catch(e){ listening=false; setStatus("Impossible de démarrer"); }
 }
-document.addEventListener("visibilitychange",()=>{
-  if(document.hidden && listening){try{recognition.stop()}catch(e){}}
-});
+document.addEventListener("visibilitychange",()=>{ if(document.hidden&&listening){try{recognition.stop()}catch(e){}} });
 render();
 </script>
 </body>
