@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>Compteur Vocal</title>
+<style>
+html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+body{display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+main{text-align:center;width:100%;padding:24px;box-sizing:border-box}
+h1{font-size:18px;letter-spacing:2px;color:#888}
+#count{font-size:clamp(90px,28vw,180px);font-weight:700;line-height:1;margin:28px 0}
+#status{font-size:18px;color:#aaa;margin:20px}
+button{border:1px solid #555;border-radius:16px;background:#181818;color:#fff;padding:15px 20px;font-size:20px;margin:5px}
+#listen{background:#176b35;border:0;font-size:19px;padding:17px 28px}
+#listen.off{background:#333}
+small{display:block;color:#666;margin:22px auto;max-width:500px;line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+<h1>COMPTEUR VOCAL</h1>
+<div id="count">0</div>
+<div id="status">Prêt</div>
+<button onclick="change(-1)">−</button>
+<button onclick="zero()">0</button>
+<button onclick="change(1)">+</button>
+<br>
+<button id="listen" onclick="toggle()">Démarrer l’écoute</button>
+<small>Dites « incrémente », « décrémente » ou « remise à zéro ».</small>
+</main>
+<script>
+let count=Number(localStorage.getItem('counter')||0), listening=false, recognition=null;
+let lastCommand='', lastTime=0;
+const $=id=>document.getElementById(id);
+function render(){ $('count').textContent=count; localStorage.setItem('counter',count); }
+function beep(freq=700){
+  try{
+    const C=window.AudioContext||window.webkitAudioContext, c=new C(),o=c.createOscillator(),g=c.createGain();
+    o.frequency.value=freq; g.gain.value=.08; o.connect(g); g.connect(c.destination); o.start();
+    o.stop(c.currentTime+.09);
+  }catch(e){}
+}
+function change(n){count+=n;render();$('status').textContent=n>0?'+1':'−1';beep(n>0?880:520)}
+function zero(){count=0;render();$('status').textContent='Zéro';beep(660)}
+render();
+
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+function setup(){
+  if(!SR){$('status').textContent='Reconnaissance vocale non disponible';return false}
+  recognition=new SR();
+  recognition.lang='fr-FR';
+  recognition.continuous=true;
+  recognition.interimResults=true;
+  recognition.maxAlternatives=3;
+  recognition.onresult=e=>{
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(!e.results[i].isFinal) continue;
+      const t=e.results[i][0].transcript.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      let cmd=null;
+      if(/remise a zero|mets? a zero|mettez a zero/.test(t)) cmd='zero';
+      else if(/decremente|moins un|enleve un|retire un/.test(t)) cmd='moins';
+      else if(/incremente|plus un|ajoute un/.test(t)) cmd='plus';
+      if(cmd){
+        const now=Date.now();
+        if(cmd!==lastCommand || now-lastTime>1000){
+          lastCommand=cmd;lastTime=now;
+          if(cmd==='plus') change(1);
+          if(cmd==='moins') change(-1);
+          if(cmd==='zero') zero();
+        }
+      }
+    }
+  };
+  recognition.onerror=e=>{
+    if(listening) $('status').textContent='Écoute active — relance…';
+  };
+  recognition.onend=()=>{
+    if(listening) setTimeout(()=>{try{recognition.start()}catch(e){}},300);
+  };
+  return true;
+}
+function toggle(){
+  if(listening){
+    listening=false;
+    try{recognition.stop()}catch(e){}
+    $('listen').textContent='Démarrer l’écoute';$('listen').classList.add('off');$('status').textContent='Pause';
+    return;
+  }
+  if(!setup())return;
+  listening=true;
+  try{recognition.start();$('listen').textContent='Mettre en pause';$('listen').classList.remove('off');$('status').textContent='Écoute active';}
+  catch(e){listening=false;$('status').textContent='Impossible de démarrer';}
+}
+document.addEventListener('visibilitychange',()=>{ if(document.hidden && listening){try{recognition.stop()}catch(e){}}});
+</script>
+</body>
+</html>
