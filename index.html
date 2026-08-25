@@ -7,21 +7,22 @@
 <meta name="theme-color" content="#000">
 <title>Crépouille</title>
 <style>
-html,body{margin:0;min-height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif}main{text-align:center;max-width:720px;margin:auto;padding:28px 20px 50px;box-sizing:border-box}h1{font-size:18px;letter-spacing:2px;color:#888}#version{font-size:12px;color:#555}#count{font-size:clamp(90px,28vw,180px);font-weight:700;margin:24px 0 10px}#status{font-size:20px;margin:14px}#mode{font-size:16px;color:#aaa;min-height:24px}#heard,#diag{font-size:13px;color:#777;min-height:20px;margin-top:8px}button{border:1px solid #555;border-radius:16px;background:#181818;color:#fff;padding:14px 18px;font-size:18px;margin:5px}#listen{background:#176b35;border:0}.card{margin-top:28px;background:#0f0f0f;border:1px solid #222;border-radius:20px;padding:18px;text-align:left}.card h2{text-align:center;font-size:17px;color:#aaa}.person{display:flex;justify-content:space-between;padding:12px 6px;border-top:1px solid #222}.person span{font-size:24px}.admin input{width:58%;padding:13px;border-radius:12px;border:1px solid #444;background:#111;color:#fff;font-size:16px}small{display:block;color:#666;line-height:1.5;margin:18px auto}
+html,body{margin:0;min-height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif}main{text-align:center;max-width:720px;margin:auto;padding:28px 20px 50px;box-sizing:border-box}h1{font-size:18px;letter-spacing:2px;color:#888}#version{font-size:12px;color:#555}#count{font-size:clamp(90px,28vw,180px);font-weight:700;margin:24px 0 10px}#status{font-size:20px;margin:14px}#mode{font-size:16px;color:#aaa;min-height:24px}#heard,#diag,#level{font-size:13px;color:#777;min-height:20px;margin-top:8px}button{border:1px solid #555;border-radius:16px;background:#181818;color:#fff;padding:14px 18px;font-size:18px;margin:5px}#listen{background:#176b35;border:0}.card{margin-top:28px;background:#0f0f0f;border:1px solid #222;border-radius:20px;padding:18px;text-align:left}.card h2{text-align:center;font-size:17px;color:#aaa}.person{display:flex;justify-content:space-between;padding:12px 6px;border-top:1px solid #222}.person span{font-size:24px}.admin input{width:58%;padding:13px;border-radius:12px;border:1px solid #444;background:#111;color:#fff;font-size:16px}small{display:block;color:#666;line-height:1.5;margin:18px auto}
 </style>
 </head>
 <body>
 <main>
 <h1>CRÉPOUILLE</h1>
-<div id="version">Version 4.0 Cloud</div>
+<div id="version">Version 4.1 Cloud + VAD</div>
 <div id="count">0</div><div>crêpes au total</div>
 <div id="status">Prêt</div>
-<div id="mode">Reconnaissance Cloudflare</div>
+<div id="mode">Reconnaissance Cloudflare avec détection locale de voix</div>
 <div id="diag">Diagnostic : en attente</div>
+<div id="level"></div>
 <div id="heard"></div>
 <button onclick="manualChange(-1)">−</button><button onclick="manualZero()">0</button><button onclick="manualChange(1)">+</button><br>
 <button id="listen" onclick="toggle()">Démarrer l’écoute Cloud</button>
-<small>Vous pouvez dire d’un bloc « Crépouille Mathieu plus un » ou en deux temps « Crépouille », puis « Mathieu plus un ».</small>
+<small>La V4.1 n’envoie plus du silence au Cloud. Elle attend qu’une voix soit détectée, enregistre la phrase complète, puis la transcrit. Vous pouvez dire « Crépouille Mathieu plus un » d’un bloc ou « Crépouille », puis « Mathieu plus un ».</small>
 <div class="card"><h2>Compteurs individuels</h2><div id="people"></div></div>
 <div class="card admin"><h2>Ajouter un prénom</h2><input id="newName" placeholder="Ex. Mathieu"><button onclick="addPerson()">Ajouter</button></div>
 </main>
@@ -30,13 +31,16 @@ const API="https://crepouille-api.mlecann.workers.dev";
 const DEFAULT_PEOPLE=["Mathieu","Sébastien","Cyrille","Emilie","Nathalie","Camille"];
 let data=JSON.parse(localStorage.getItem("crepouilleData")||"null")||{total:0,people:{}};
 if(!data.people||typeof data.people!=="object")data.people={};DEFAULT_PEOPLE.forEach(n=>{if(!(n in data.people))data.people[n]=0});delete data.people.Delphine;
-let running=false,stream=null,recorder=null,queue=[],sending=false,timer=null,lastKey="",lastTime=0,history=[];
-const HISTORY_MS=7000,CHUNK_MS=3200,$=id=>document.getElementById(id);
+let running=false,stream=null,recorder=null,audioCtx=null,analyser=null,source=null,raf=0;
+let preRoll=[],utterance=[],speechActive=false,speechStartedAt=0,lastVoiceAt=0;
+let queue=[],sending=false,lastKey="",lastTime=0,history=[];
+let noiseFloor=.008,threshold=.022,calibrationUntil=0,calibrationSamples=[];
+const HISTORY_MS=8000,SILENCE_MS=750,MAX_UTTERANCE_MS=7500,PRE_ROLL_CHUNKS=4,$=id=>document.getElementById(id);
 function save(){localStorage.setItem("crepouilleData",JSON.stringify(data))}
 function norm(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/−/g,"-").replace(/\s+/g," ").trim()}
 function render(){$("count").textContent=data.total;const h=$("people");h.innerHTML="";Object.entries(data.people).sort((a,b)=>a[0].localeCompare(b[0],"fr")).forEach(([n,v])=>{const r=document.createElement("div");r.className="person";r.innerHTML=`<strong>${n}</strong><span>${v}</span>`;h.appendChild(r)});save()}
 function status(t){$("status").textContent=t}function diag(t){$("diag").textContent="Diagnostic : "+t}
-function beep(f=760,d=.08){try{const C=window.AudioContext||window.webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=f;g.gain.value=.08;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+d)}catch(e){}}
+function beep(f=760,d=.08){try{const C=window.AudioContext||window.webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=f;g.gain.value=.07;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+d)}catch(e){}}
 function apply(name,d){data.people[name]=(data.people[name]||0)+d;data.total+=d;render();status(`${name} ${d>0?"+1":"−1"}`);beep(d>0?900:500)}
 function manualChange(n){data.total+=n;render()}function manualZero(){data.total=0;Object.keys(data.people).forEach(k=>data.people[k]=0);render();status("Tous les compteurs à zéro")}
 function addPerson(){const i=$("newName"),n=i.value.trim();if(!n)return;if(!(n in data.people))data.people[n]=0;i.value="";render();status(`${n} ajouté`)}
@@ -47,10 +51,17 @@ function parse(text){const p=detectPerson(text),d=detectDelta(text);if(!p||!d||!
 function pruneHistory(){const now=Date.now();history=history.filter(x=>now-x.time<HISTORY_MS).slice(-5)}
 function handleTranscript(text){text=String(text||"").trim();if(!text)return;$("heard").textContent="Entendu : « "+text+" »";history.push({text,time:Date.now()});pruneHistory();const candidates=[text];for(let i=0;i<history.length;i++)candidates.push(history.slice(i).map(x=>x.text).join(" "));for(const c of candidates){const x=parse(c);if(!x)continue;const k=x.p+":"+x.d,now=Date.now();if(k===lastKey&&now-lastTime<2200)return;lastKey=k;lastTime=now;history=[];apply(x.p,x.d);return}}
 function chooseMime(){const types=["audio/mp4","audio/webm;codecs=opus","audio/webm"];for(const t of types){if(window.MediaRecorder&&MediaRecorder.isTypeSupported(t))return t}return ""}
-function startChunk(){if(!running||!stream)return;let chunks=[];try{const mime=chooseMime();recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};recorder.onstop=()=>{if(chunks.length){const blob=new Blob(chunks,{type:recorder.mimeType||chunks[0].type||"application/octet-stream"});queue.push(blob);processQueue()}if(running)setTimeout(startChunk,40)};recorder.start();timer=setTimeout(()=>{if(recorder&&recorder.state==="recording")recorder.stop()},CHUNK_MS);diag("enregistrement en cours")}catch(e){diag("erreur enregistrement : "+e.message);stopAll()}}
-async function processQueue(){if(sending||!queue.length)return;sending=true;const blob=queue.shift();diag("transcription Cloud…");try{const r=await fetch(API,{method:"POST",headers:{"Content-Type":blob.type||"application/octet-stream"},body:blob});const j=await r.json();if(!r.ok)throw new Error(j.error||("HTTP "+r.status));diag("Cloud OK");handleTranscript(j.text||"")}catch(e){diag("erreur Cloud : "+e.message)}finally{sending=false;if(queue.length)processQueue()}}
-async function startAll(){if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){diag("MediaRecorder indisponible");return}try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});running=true;$("listen").textContent="Mettre en pause";status("Écoute Cloud active");$("mode").textContent="Parlez normalement — analyse toutes les ~3 s";startChunk()}catch(e){diag("micro refusé : "+e.message);status("Microphone indisponible")}}
-function stopAll(){running=false;clearTimeout(timer);try{if(recorder&&recorder.state==="recording")recorder.stop()}catch(e){}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$("listen").textContent="Démarrer l’écoute Cloud";status("Pause");$("mode").textContent="Reconnaissance Cloudflare";diag("arrêtée")}
+function rmsLevel(){const arr=new Uint8Array(analyser.fftSize);analyser.getByteTimeDomainData(arr);let sum=0;for(let i=0;i<arr.length;i++){const v=(arr[i]-128)/128;sum+=v*v}return Math.sqrt(sum/arr.length)}
+function monitor(){if(!running||!analyser)return;const now=Date.now(),rms=rmsLevel();$("level").textContent=`Niveau micro : ${rms.toFixed(3)} · seuil voix : ${threshold.toFixed(3)}`;
+  if(now<calibrationUntil){calibrationSamples.push(rms);diag("calibrage du bruit ambiant…");}
+  else if(calibrationSamples.length){const avg=calibrationSamples.reduce((a,b)=>a+b,0)/calibrationSamples.length;noiseFloor=Math.max(.003,avg);threshold=Math.max(.016,noiseFloor*2.6);calibrationSamples=[];diag("prêt — attente de voix");status("Écoute active");}
+  else if(!speechActive){noiseFloor=noiseFloor*.995+rms*.005;threshold=Math.max(.016,noiseFloor*2.6);if(rms>threshold){speechActive=true;speechStartedAt=now;lastVoiceAt=now;utterance=preRoll.slice();preRoll=[];diag("voix détectée — enregistrement de la phrase");status("🎙️ Parole détectée");}}
+  else {if(rms>threshold*.75)lastVoiceAt=now;if(now-lastVoiceAt>SILENCE_MS||now-speechStartedAt>MAX_UTTERANCE_MS)finishUtterance();}
+  raf=requestAnimationFrame(monitor)}
+function finishUtterance(){if(!speechActive)return;speechActive=false;const dur=Date.now()-speechStartedAt;if(utterance.length&&dur>250){const type=recorder?.mimeType||utterance[0]?.type||"application/octet-stream";const blob=new Blob(utterance,{type});queue.push(blob);processQueue()}utterance=[];preRoll=[];diag("phrase terminée — transcription Cloud…");status("Analyse…")}
+async function processQueue(){if(sending||!queue.length)return;sending=true;const blob=queue.shift();try{const r=await fetch(API,{method:"POST",headers:{"Content-Type":blob.type||"application/octet-stream"},body:blob});const j=await r.json();if(!r.ok)throw new Error(j.error||("HTTP "+r.status));diag("Cloud OK — attente de voix");status("Écoute active");handleTranscript(j.text||"")}catch(e){diag("erreur Cloud : "+e.message);status("Erreur de transcription")}finally{sending=false;if(queue.length)processQueue()}}
+async function startAll(){if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){diag("MediaRecorder indisponible");return}try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});audioCtx=new (window.AudioContext||window.webkitAudioContext)();source=audioCtx.createMediaStreamSource(stream);analyser=audioCtx.createAnalyser();analyser.fftSize=1024;source.connect(analyser);const mime=chooseMime();recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream);recorder.ondataavailable=e=>{if(!e.data||!e.data.size)return;if(speechActive)utterance.push(e.data);else{preRoll.push(e.data);if(preRoll.length>PRE_ROLL_CHUNKS)preRoll.shift()}};recorder.start(250);running=true;calibrationUntil=Date.now()+1500;calibrationSamples=[];$("listen").textContent="Mettre en pause";$("mode").textContent="Détection locale de voix + transcription Cloud";diag("calibrage du bruit ambiant…");status("Calibrage…");monitor()}catch(e){diag("micro refusé : "+e.message);status("Microphone indisponible")}}
+function stopAll(){running=false;cancelAnimationFrame(raf);if(speechActive)finishUtterance();try{if(recorder&&recorder.state!=="inactive")recorder.stop()}catch(e){}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}try{audioCtx?.close()}catch(e){}recorder=null;analyser=null;source=null;audioCtx=null;preRoll=[];utterance=[];speechActive=false;$("listen").textContent="Démarrer l’écoute Cloud";status("Pause");$("mode").textContent="Reconnaissance Cloudflare avec détection locale de voix";diag("arrêtée");$("level").textContent=""}
 function toggle(){running?stopAll():startAll()}
 render();
 </script>
