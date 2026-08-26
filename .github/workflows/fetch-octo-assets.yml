@@ -1,0 +1,33 @@
+name: Fetch Octo wake word assets
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fetch-octo-assets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download OpenWakeWord models
+        run: |
+          mkdir -p wakeword-models
+          curl -L --fail -o wakeword-models/melspectrogram.onnx https://raw.githubusercontent.com/dnavarrom/openwakeword_wasm/main/models/melspectrogram.onnx
+          curl -L --fail -o wakeword-models/embedding_model.onnx https://raw.githubusercontent.com/dnavarrom/openwakeword_wasm/main/models/embedding_model.onnx
+          curl -L --fail -o wakeword-models/silero_vad.onnx https://raw.githubusercontent.com/dnavarrom/openwakeword_wasm/main/models/silero_vad.onnx
+          curl -L --fail -o wakeword-models/octo_v0.1.onnx https://huggingface.co/openocto-dev/openocto-models/resolve/main/octo_v0.1.onnx
+      - name: Commit models
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add wakeword-models
+          git diff --cached --quiet && exit 0
+          git commit -m 'Add Hey Octo wake word models'
+          git push
