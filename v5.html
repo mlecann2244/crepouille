@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#000">
-<title>Crépouille V5.2</title>
+<title>Crépouille V5.3</title>
 <style>
 html,body{margin:0;min-height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
 main{text-align:center;max-width:720px;margin:auto;padding:28px 20px 50px;box-sizing:border-box}
@@ -17,74 +17,51 @@ button,a.btn{border:1px solid #555;border-radius:16px;background:#181818;color:#
 #listen{background:#176b35;border:0}.card{margin-top:28px;background:#0f0f0f;border:1px solid #222;border-radius:20px;padding:18px;text-align:left}.card h2{text-align:center;font-size:17px;color:#aaa}.person{display:flex;justify-content:space-between;padding:12px 6px;border-top:1px solid #222}.person span{font-size:24px}small{display:block;color:#666;line-height:1.5;margin:18px auto}
 </style>
 <script>
-var API='https://crepouille-api.mlecann.workers.dev';
 var DEFAULT_PEOPLE=['Mathieu','Sébastien','Cyrille','Emilie','Nathalie','Camille'];
-var engine=null, running=false, busy=false;
+var engine=null,running=false,busy=false;
 var data={total:0,people:{}};
-
 function el(id){return document.getElementById(id)}
 function diag(t){if(el('diag'))el('diag').textContent='Diagnostic : '+t}
 function statusText(t){if(el('status'))el('status').textContent=t}
 function save(){localStorage.setItem('crepouilleData',JSON.stringify(data))}
 function loadData(){try{var raw=localStorage.getItem('crepouilleData');data=raw?JSON.parse(raw):{total:0,people:{}}}catch(e){data={total:0,people:{}}}if(!data.people)data.people={};for(var i=0;i<DEFAULT_PEOPLE.length;i++){if(typeof data.people[DEFAULT_PEOPLE[i]]!=='number')data.people[DEFAULT_PEOPLE[i]]=0}delete data.people.Delphine}
-function render(){if(!el('count')||!el('people'))return;el('count').textContent=data.total;var p=el('people');p.innerHTML='';var names=Object.keys(data.people).sort(function(a,b){return data.people[b]-data.people[a]||a.localeCompare(b,'fr')});for(var i=0;i<names.length;i++){var n=names[i],r=document.createElement('div');r.className='person';r.innerHTML='<strong>'+n+'</strong><span>'+data.people[n]+'</span>';p.appendChild(r)}save()}
+function render(){el('count').textContent=data.total;var p=el('people');p.innerHTML='';var names=Object.keys(data.people).sort(function(a,b){return data.people[b]-data.people[a]||a.localeCompare(b,'fr')});for(var i=0;i<names.length;i++){var n=names[i],r=document.createElement('div');r.className='person';r.innerHTML='<strong>'+n+'</strong><span>'+data.people[n]+'</span>';p.appendChild(r)}save()}
 function unlockVoice(){try{var u=new SpeechSynthesisUtterance(' ');u.volume=0;u.lang='fr-FR';speechSynthesis.speak(u)}catch(e){}}
 function speak(text){try{speechSynthesis.cancel();var u=new SpeechSynthesisUtterance(text);u.lang='fr-FR';u.rate=.95;u.volume=1;speechSynthesis.speak(u)}catch(e){diag('erreur voix : '+e.message)}}
 function testVoice(){diag('bouton voix détecté');unlockVoice();speak('Test Crépouille. La synthèse vocale fonctionne.');statusText('Test vocal lancé')}
 function beep(){try{var C=window.AudioContext||window.webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=760;g.gain.value=.08;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.1)}catch(e){}}
-
-async function loadWakeModule(){
-  diag('chargement de la librairie OpenWakeWord…');
-  var mod=await import('https://esm.sh/openwakeword-wasm-browser@0.1.1?bundle');
-  diag('librairie téléchargée');
-  return mod.default||mod.WakeWordEngine||mod.OpenWakeWord;
-}
-
+async function loadWakeModule(){diag('chargement de la librairie OpenWakeWord…');var mod=await import('https://esm.sh/openwakeword-wasm-browser@0.1.1?bundle');diag('librairie téléchargée');return mod.default||mod.WakeWordEngine||mod.OpenWakeWord}
 async function toggleWake(){
-  diag('bouton Hey Jarvis détecté');
-  unlockVoice();
-  if(running){
-    try{if(engine&&engine.stop)await engine.stop()}catch(e){}
-    running=false;statusText('Pause');el('listen').textContent='Démarrer Hey Jarvis';diag('arrêté');return;
-  }
-  if(busy)return;
-  busy=true;el('listen').textContent='Chargement…';statusText('Chargement Hey Jarvis…');
-  try{
-    var Engine=await loadWakeModule();
-    if(!Engine)throw new Error('API OpenWakeWord introuvable dans le module');
-    diag('création du moteur…');
-    engine=new Engine({keywords:['hey_jarvis'],detectionThreshold:.55,cooldownMs:2500});
-    if(engine.on){
-      engine.on('detect',function(info){diag('Hey Jarvis détecté');statusText('Hey Jarvis détecté');beep();});
-      engine.on('error',function(e){diag('erreur moteur : '+String(e&&e.message?e.message:e));});
-    }
-    if(engine.load){diag('chargement du modèle…');await engine.load()}
-    if(engine.start){diag('démarrage micro local…');await engine.start({gain:1.2})}
-    running=true;el('listen').textContent='Arrêter Hey Jarvis';statusText('En veille — dites « Hey Jarvis »');diag('Hey Jarvis local actif');
-  }catch(e){
-    running=false;el('listen').textContent='Réessayer Hey Jarvis';statusText('Wake word indisponible');diag('ERREUR : '+(e&&e.message?e.message:String(e)));
-  }finally{busy=false}
+ diag('bouton Hey Jarvis détecté');unlockVoice();
+ if(running){try{if(engine&&engine.stop)await engine.stop()}catch(e){}running=false;statusText('Pause');el('listen').textContent='Démarrer Hey Jarvis';diag('arrêté');return}
+ if(busy)return;busy=true;el('listen').textContent='Chargement…';statusText('Chargement Hey Jarvis…');
+ try{
+   var Engine=await loadWakeModule();if(!Engine)throw new Error('API OpenWakeWord introuvable dans le module');
+   diag('création du moteur avec backend Safari…');
+   engine=new Engine({
+     keywords:['hey_jarvis'],
+     detectionThreshold:.55,
+     cooldownMs:2500,
+     baseAssetUrl:'https://raw.githubusercontent.com/dnavarrom/openwakeword_wasm/main/models',
+     ortWasmPath:'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/',
+     executionProviders:['wasm']
+   });
+   if(engine.on){engine.on('detect',function(info){diag('Hey Jarvis détecté');statusText('Hey Jarvis détecté');beep()});engine.on('error',function(e){diag('erreur moteur : '+String(e&&e.message?e.message:e))})}
+   diag('chargement des modèles locaux au navigateur…');await engine.load();
+   diag('démarrage micro local…');await engine.start({gain:1.2});
+   running=true;el('listen').textContent='Arrêter Hey Jarvis';statusText('En veille — dites « Hey Jarvis »');diag('Hey Jarvis local actif — aucun audio Cloud')
+ }catch(e){running=false;el('listen').textContent='Réessayer Hey Jarvis';statusText('Wake word indisponible');diag('ERREUR : '+(e&&e.message?e.message:String(e)))}finally{busy=false}
 }
-
-window.addEventListener('load',function(){loadData();render();diag('interface V5.2 prête — boutons actifs')});
+window.addEventListener('load',function(){loadData();render();diag('interface V5.3 prête')});
 window.addEventListener('error',function(e){diag('JS : '+e.message)});
 window.addEventListener('unhandledrejection',function(e){var r=e.reason;diag('PROMESSE : '+(r&&r.message?r.message:String(r)))});
 </script>
 </head>
-<body>
-<main>
-<h1>CRÉPOUILLE</h1>
-<div id="version">Version 5.2 diagnostic — Hey Jarvis local</div>
-<div id="count">0</div><div>crêpes au total</div>
-<div id="status">Prêt</div>
-<div id="mode">Test du wake word local « Hey Jarvis »</div>
-<div id="diag">Diagnostic : chargement…</div>
-<div id="heard"></div>
-<button id="listen" onclick="toggleWake()">Démarrer Hey Jarvis</button>
-<button id="testVoice" onclick="testVoice()">Tester la voix</button><br>
-<a class="btn" href="./">Retour V4.9 stable</a>
-<small>Cette V5.2 isole le moteur Hey Jarvis pour diagnostiquer Safari. Aucun changement n’est fait à la V4.9 stable.</small>
+<body><main>
+<h1>CRÉPOUILLE</h1><div id="version">Version 5.3 test Safari — Hey Jarvis local</div>
+<div id="count">0</div><div>crêpes au total</div><div id="status">Prêt</div>
+<div id="mode">Wake word local « Hey Jarvis » — backend WASM explicite</div><div id="diag">Diagnostic : chargement…</div><div id="heard"></div>
+<button id="listen" onclick="toggleWake()">Démarrer Hey Jarvis</button><button onclick="testVoice()">Tester la voix</button><br><a class="btn" href="./">Retour V4.9 stable</a>
+<small>Cette V5.3 force explicitement ONNX Runtime vers son backend WebAssembly compatible Safari. Aucun audio n’est envoyé à Cloudflare pendant l’attente de « Hey Jarvis ».</small>
 <div class="card"><h2>Compteurs individuels</h2><div id="people"></div></div>
-</main>
-</body>
-</html>
+</main></body></html>
