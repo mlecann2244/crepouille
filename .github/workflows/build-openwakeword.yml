@@ -1,0 +1,57 @@
+name: Build self-hosted OpenWakeWord
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-openwakeword.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          rm -rf .oww-build
+          mkdir .oww-build
+          cd .oww-build
+          npm init -y
+          npm install openwakeword-wasm-browser@0.1.0 onnxruntime-web@1.23.2 esbuild@0.25.9
+
+      - name: Build browser bundle
+        run: |
+          mkdir -p vendor/openwakeword/models
+          cat > .oww-build/entry.js <<'EOF'
+          import WakeWordEngine from 'openwakeword-wasm-browser';
+          import * as ort from 'onnxruntime-web';
+          ort.env.wasm.wasmPaths = './vendor/openwakeword/';
+          ort.env.wasm.numThreads = 1;
+          window.OpenWakeWordEngine = WakeWordEngine;
+          window.ort = ort;
+          EOF
+          cd .oww-build
+          npx esbuild entry.js --bundle --format=iife --platform=browser --target=safari16 --outfile=../vendor/openwakeword/openwakeword.bundle.js
+          cp node_modules/onnxruntime-web/dist/ort-wasm*.wasm ../vendor/openwakeword/ || true
+          cp node_modules/onnxruntime-web/dist/ort-wasm*.mjs ../vendor/openwakeword/ || true
+          cp node_modules/openwakeword-wasm-browser/models/*.onnx ../vendor/openwakeword/models/
+
+      - name: Commit generated assets
+        run: |
+          rm -rf .oww-build
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add vendor/openwakeword
+          git diff --cached --quiet && exit 0
+          git commit -m 'Build self-hosted OpenWakeWord assets'
+          git push
